@@ -44,7 +44,17 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Third-party
     "rest_framework",
+    # Local apps
+    "apps.screens",
+    "apps.flags",
+    "apps.funds",
+    "apps.serving",
+    "apps.common",
 ]
+
+REST_FRAMEWORK = {
+    "EXCEPTION_HANDLER": "apps.common.exceptions.custom_exception_handler",
+}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
