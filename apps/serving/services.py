@@ -1,8 +1,95 @@
 """
 The screen-aggregation service.
 
-Empty shell for Phase 1. Phase 2 will add the aggregator that assembles a
-Screen's active Sections, calls each widget's owning-app service function to
-fetch its data (per-section error isolation — see rules.md §3), and returns
-the assembled screen response.
+assemble_screen() loads a Screen's active Sections (via apps.screens.services
+-- never apps.screens.models directly, per the app-boundary rule in rules.md
+§2/PRD §9A), filters out sections the requesting client is too old for, then
+fetches each section's data concurrently. Each fetch is isolated (Bulkhead
+pattern, PRD §12A): one widget's failure never fails the rest of the screen.
 """
+
+import logging
+from concurrent.futures import ThreadPoolExecutor
+
+from django.db import connections
+
+from apps.common.exceptions import AppError
+from apps.screens.services import get_active_sections
+from apps.serving.widget_registry import WIDGET_HANDLERS
+
+logger = logging.getLogger(__name__)
+
+
+def assemble_screen(
+    screen_key: str, user_id: str, platform: str = "", app_version: str = "0.0.0"
+) -> dict:
+    """
+    Assemble the full screen response for a given user.
+
+    `platform` is accepted (mirrors the PRD §9 request signature) but not
+    used for filtering in this phase -- only `min_app_version` gates a
+    section today.
+    """
+    sections = get_active_sections(screen_key)
+    sections = [s for s in sections if _compare_versions(app_version, s.min_app_version)]
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            section.id: executor.submit(_fetch_section_data, section, user_id)
+            for section in sections
+        }
+        data_by_section_id = {section_id: future.result() for section_id, future in futures.items()}
+
+    assembled_sections = [
+        {
+            "widget_type": section.widget_type.key,
+            "title": section.title,
+            "order": section.order,
+            "config": section.config,
+            "data": data_by_section_id[section.id],
+        }
+        for section in sections
+    ]
+
+    return {"screen_key": screen_key, "sections": assembled_sections}
+
+
+def _fetch_section_data(section, user_id: str) -> dict:
+    """
+    Fetch one section's data, isolating its failure from the rest of the screen.
+
+    Runs on a ThreadPoolExecutor worker thread, which gets its own DB
+    connection that Django's request/response cycle never closes (that
+    cleanup only runs on the main thread). Close it explicitly here so
+    concurrent screen requests don't leak a connection per worker per request.
+    """
+    try:
+        handler = WIDGET_HANDLERS.get(section.widget_type.key)
+        if handler is None:
+            return {"status": "unavailable", "error_code": "WIDGET_UNKNOWN"}
+
+        try:
+            return handler(user_id)
+        except AppError as e:
+            logger.warning(
+                "Widget data unavailable for widget_type=%s: %s", section.widget_type.key, e.message
+            )
+            return {"status": "unavailable", "error_code": "WIDGET_UNAVAILABLE"}
+    finally:
+        connections.close_all()
+
+
+def _compare_versions(client_version: str, min_version: str) -> bool:
+    """Return True if client_version >= min_version (section should be shown)."""
+    if not min_version:
+        return True
+    if not client_version:
+        return False
+
+    def _parse(version: str) -> tuple:
+        parts = [int(p) for p in version.split(".")]
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts[:3])
+
+    return _parse(client_version) >= _parse(min_version)

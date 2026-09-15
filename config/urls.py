@@ -4,7 +4,7 @@ URL configuration for config project.
 
 from django.contrib import admin
 from django.http import HttpResponse
-from django.urls import path
+from django.urls import include, path
 
 
 def metrics_placeholder(request):
@@ -20,4 +20,5 @@ def metrics_placeholder(request):
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("metrics", metrics_placeholder, name="metrics"),
+    path("api/v1/", include("apps.serving.urls")),
 ]
