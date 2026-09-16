@@ -4,9 +4,10 @@ The screen-aggregation service.
 assemble_screen() loads a Screen's published layout snapshot (via
 apps.screens.services -- never apps.screens.models directly, per the
 app-boundary rule in rules.md §2/PRD §9A), filters out sections the
-requesting client is too old for, then fetches each section's data
-concurrently. Each fetch is isolated (Bulkhead pattern, PRD §12A): one
-widget's failure never fails the rest of the screen.
+requesting client is too old for or that fail their feature-flag gate
+(apps.flags.services.evaluate_flag()), then fetches each remaining
+section's data concurrently. Each fetch is isolated (Bulkhead pattern,
+PRD §12A): one widget's failure never fails the rest of the screen.
 
 As of Phase 3, sections come from a LayoutVersion snapshot (dicts), not
 live Section ORM rows -- see apps.screens.services.get_active_sections().
@@ -18,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from django.db import connections
 
 from apps.common.exceptions import AppError
+from apps.flags.services import evaluate_flag
 from apps.screens.services import get_active_sections
 from apps.serving.widget_registry import WIDGET_HANDLERS
 
@@ -36,7 +38,12 @@ def assemble_screen(
     """
     layout = get_active_sections(screen_key)
     layout_version = layout["version_number"]
-    sections = [s for s in layout["sections"] if _compare_versions(app_version, s["min_app_version"])]
+    user_context = {"user_id": user_id, "platform": platform, "app_version": app_version}
+    sections = [
+        s
+        for s in layout["sections"]
+        if _compare_versions(app_version, s["min_app_version"]) and _passes_flag_gate(s, user_context)
+    ]
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
@@ -81,6 +88,14 @@ def _fetch_section_data(section: dict, user_id: str) -> dict:
             return {"status": "unavailable", "error_code": "WIDGET_UNAVAILABLE"}
     finally:
         connections.close_all()
+
+
+def _passes_flag_gate(section: dict, user_context: dict) -> bool:
+    """Return False only if the section's config.feature_flag_key gate rejects this user."""
+    flag_key = section.get("config", {}).get("feature_flag_key")
+    if not flag_key:
+        return True
+    return evaluate_flag(flag_key, user_context)
 
 
 def _compare_versions(client_version: str, min_version: str) -> bool:

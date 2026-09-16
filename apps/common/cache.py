@@ -72,3 +72,7 @@ def portfolio_cache_key(user_id: str) -> str:
 
 def holdings_cache_key(user_id: str) -> str:
     return f"holdings:{user_id}:list"
+
+
+def flag_cache_key(flag_key: str) -> str:
+    return f"flag:{flag_key}"
