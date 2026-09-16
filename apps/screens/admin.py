@@ -8,7 +8,7 @@ from apps.screens.services import publish_layout
 class SectionInline(admin.TabularInline):
     model = Section
     extra = 1
-    fields = ("widget_type", "title", "order", "is_active", "min_app_version")
+    fields = ("widget_type", "title", "order", "is_active", "min_app_version", "config")
 
 
 @admin.action(description="Publish layout")

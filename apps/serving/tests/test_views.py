@@ -8,6 +8,7 @@ from rest_framework import status
 from rest_framework.test import APITransactionTestCase
 
 from apps.common.exceptions import WidgetDataUnavailable
+from apps.flags.models import FeatureFlag
 from apps.funds.models import Fund, Holding, Portfolio, PortfolioSnapshot
 from apps.screens.models import Screen, Section, WidgetType
 from apps.screens.services import publish_layout
@@ -246,3 +247,57 @@ class WidgetViewTests(ServingTestDataMixin, APITransactionTestCase):
 
         embedded_data = screen_response.data["data"]["sections"][0]["data"]
         self.assertEqual(embedded_data, widget_response.data["data"])
+
+
+@override_settings(CACHES=TEST_CACHES)
+class FlagGatedSectionTests(ServingTestDataMixin, APITransactionTestCase):
+    def _add_flagged_section(self, flag_key):
+        Section.objects.create(
+            screen=self.screen,
+            widget_type=self.widget_types["grid"],
+            title="Flagged Grid Widget",
+            order=5,
+            config={"feature_flag_key": flag_key},
+        )
+
+    def test_flagged_section_hidden_when_flag_disabled(self):
+        FeatureFlag.objects.create(key="new_widget", is_enabled=False, rollout_percentage=100)
+        self._add_flagged_section("new_widget")
+
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_with_data)}
+        )
+
+        self.assertEqual(response.data["meta"]["total_sections"], 4)
+        widget_types = [s["widget_type"] for s in response.data["data"]["sections"]]
+        self.assertNotIn("grid", widget_types[4:])
+
+    def test_flagged_section_shown_at_100pct_rollout(self):
+        FeatureFlag.objects.create(key="new_widget", is_enabled=True, rollout_percentage=100)
+        self._add_flagged_section("new_widget")
+
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_with_data)}
+        )
+
+        self.assertEqual(response.data["meta"]["total_sections"], 5)
+        self.assertEqual(response.data["data"]["sections"][4]["title"], "Flagged Grid Widget")
+
+    def test_unflagged_section_always_shown(self):
+        FeatureFlag.objects.create(key="new_widget", is_enabled=False, rollout_percentage=0)
+
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_with_data)}
+        )
+
+        self.assertEqual(response.data["meta"]["total_sections"], 4)
+
+    def test_unknown_flag_key_fails_open(self):
+        self._add_flagged_section("does_not_exist_flag")
+
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_with_data)}
+        )
+
+        self.assertEqual(response.data["meta"]["total_sections"], 5)
+        self.assertEqual(response.data["data"]["sections"][4]["title"], "Flagged Grid Widget")
