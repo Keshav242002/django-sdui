@@ -2,13 +2,20 @@ import uuid
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.core.cache import cache
+from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITransactionTestCase
 
 from apps.common.exceptions import WidgetDataUnavailable
 from apps.funds.models import Fund, Holding, Portfolio, PortfolioSnapshot
 from apps.screens.models import Screen, Section, WidgetType
+from apps.screens.services import publish_layout
 from apps.serving import widget_registry
+
+TEST_CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+}
 
 
 class ServingTestDataMixin:
@@ -20,6 +27,7 @@ class ServingTestDataMixin:
     """
 
     def setUp(self):
+        cache.clear()
         self.widget_types = {}
         for key in ["portfolio_summary", "holdings_list", "horizontal_carousel", "grid"]:
             self.widget_types[key] = WidgetType.objects.create(key=key, name=key)
@@ -81,6 +89,7 @@ class ServingTestDataMixin:
         self.user_without_data = uuid.uuid4()
 
 
+@override_settings(CACHES=TEST_CACHES)
 class ScreenViewTests(ServingTestDataMixin, APITransactionTestCase):
     def test_happy_path_returns_four_sections_with_real_data(self):
         response = self.client.get(
@@ -162,7 +171,53 @@ class ScreenViewTests(ServingTestDataMixin, APITransactionTestCase):
         self.assertEqual(sections[1]["data"][0]["fund_name"], "Alpha Bluechip Equity Fund")
         self.assertEqual(sections[3]["data"][0]["name"], "Alpha Bluechip Equity Fund")
 
+    def test_response_uses_published_snapshot_not_live_sections(self):
+        publish_layout(self.screen.key, published_by="tester")
 
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_with_data)}
+        )
+
+        self.assertEqual(response.data["meta"]["layout_version"], 1)
+        self.assertEqual(response.data["data"]["layout_version"], 1)
+        self.assertEqual(response.data["meta"]["total_sections"], 4)
+
+    def test_unpublished_screen_has_null_layout_version(self):
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_with_data)}
+        )
+
+        self.assertIsNone(response.data["meta"]["layout_version"])
+        self.assertIsNone(response.data["data"]["layout_version"])
+
+    def test_snapshot_isolation_editing_section_after_publish_does_not_change_response(self):
+        publish_layout(self.screen.key, published_by="tester")
+
+        self.sections[0].title = "Your Portfolio EDITED"
+        self.sections[0].save()
+
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_with_data)}
+        )
+
+        self.assertEqual(response.data["data"]["sections"][0]["title"], "Your Portfolio")
+
+    def test_republish_picks_up_the_edit(self):
+        publish_layout(self.screen.key, published_by="tester")
+
+        self.sections[0].title = "Your Portfolio EDITED"
+        self.sections[0].save()
+        publish_layout(self.screen.key, published_by="tester")
+
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_with_data)}
+        )
+
+        self.assertEqual(response.data["data"]["sections"][0]["title"], "Your Portfolio EDITED")
+        self.assertEqual(response.data["data"]["layout_version"], 2)
+
+
+@override_settings(CACHES=TEST_CACHES)
 class WidgetViewTests(ServingTestDataMixin, APITransactionTestCase):
     def test_standalone_widget_returns_data(self):
         response = self.client.get(

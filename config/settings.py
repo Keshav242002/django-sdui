@@ -112,6 +112,17 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_URL,
+        "OPTIONS": {
+            # Without these, a down/unreachable Redis blocks each cache
+            # operation for redis-py's default timeout, which stacks up
+            # fast across the ~10 cache calls one screen request makes
+            # (measured ~8-12s for a single request with Redis down).
+            # This bounds it to a fixed worst case per call; the real
+            # fix (a circuit breaker that skips Redis entirely after
+            # repeated failures) is still deferred -- see apps/common/cache.py.
+            "socket_connect_timeout": 0.2,
+            "socket_timeout": 0.2,
+        },
     }
 }
 
@@ -190,6 +201,11 @@ LOGGING = {
     },
     "loggers": {
         "django": {
+            "handlers": ["console"],
+            "level": os.environ.get("DJANGO_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+        "apps": {
             "handlers": ["console"],
             "level": os.environ.get("DJANGO_LOG_LEVEL", "INFO"),
             "propagate": False,

@@ -29,7 +29,11 @@ class ScreenView(APIView):
         return Response(
             {
                 "data": data,
-                "meta": {"screen_key": screen_key, "total_sections": len(data["sections"])},
+                "meta": {
+                    "screen_key": screen_key,
+                    "layout_version": data["layout_version"],
+                    "total_sections": len(data["sections"]),
+                },
             }
         )
 

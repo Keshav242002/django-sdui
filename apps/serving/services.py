@@ -1,11 +1,15 @@
 """
 The screen-aggregation service.
 
-assemble_screen() loads a Screen's active Sections (via apps.screens.services
--- never apps.screens.models directly, per the app-boundary rule in rules.md
-§2/PRD §9A), filters out sections the requesting client is too old for, then
-fetches each section's data concurrently. Each fetch is isolated (Bulkhead
-pattern, PRD §12A): one widget's failure never fails the rest of the screen.
+assemble_screen() loads a Screen's published layout snapshot (via
+apps.screens.services -- never apps.screens.models directly, per the
+app-boundary rule in rules.md §2/PRD §9A), filters out sections the
+requesting client is too old for, then fetches each section's data
+concurrently. Each fetch is isolated (Bulkhead pattern, PRD §12A): one
+widget's failure never fails the rest of the screen.
+
+As of Phase 3, sections come from a LayoutVersion snapshot (dicts), not
+live Section ORM rows -- see apps.screens.services.get_active_sections().
 """
 
 import logging
@@ -30,31 +34,32 @@ def assemble_screen(
     used for filtering in this phase -- only `min_app_version` gates a
     section today.
     """
-    sections = get_active_sections(screen_key)
-    sections = [s for s in sections if _compare_versions(app_version, s.min_app_version)]
+    layout = get_active_sections(screen_key)
+    layout_version = layout["version_number"]
+    sections = [s for s in layout["sections"] if _compare_versions(app_version, s["min_app_version"])]
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
-            section.id: executor.submit(_fetch_section_data, section, user_id)
-            for section in sections
+            index: executor.submit(_fetch_section_data, section, user_id)
+            for index, section in enumerate(sections)
         }
-        data_by_section_id = {section_id: future.result() for section_id, future in futures.items()}
+        data_by_index = {index: future.result() for index, future in futures.items()}
 
     assembled_sections = [
         {
-            "widget_type": section.widget_type.key,
-            "title": section.title,
-            "order": section.order,
-            "config": section.config,
-            "data": data_by_section_id[section.id],
+            "widget_type": section["widget_type"],
+            "title": section["title"],
+            "order": section["order"],
+            "config": section["config"],
+            "data": data_by_index[index],
         }
-        for section in sections
+        for index, section in enumerate(sections)
     ]
 
-    return {"screen_key": screen_key, "sections": assembled_sections}
+    return {"screen_key": screen_key, "layout_version": layout_version, "sections": assembled_sections}
 
 
-def _fetch_section_data(section, user_id: str) -> dict:
+def _fetch_section_data(section: dict, user_id: str) -> dict:
     """
     Fetch one section's data, isolating its failure from the rest of the screen.
 
@@ -64,16 +69,15 @@ def _fetch_section_data(section, user_id: str) -> dict:
     concurrent screen requests don't leak a connection per worker per request.
     """
     try:
-        handler = WIDGET_HANDLERS.get(section.widget_type.key)
+        widget_type = section["widget_type"]
+        handler = WIDGET_HANDLERS.get(widget_type)
         if handler is None:
             return {"status": "unavailable", "error_code": "WIDGET_UNKNOWN"}
 
         try:
             return handler(user_id)
         except AppError as e:
-            logger.warning(
-                "Widget data unavailable for widget_type=%s: %s", section.widget_type.key, e.message
-            )
+            logger.warning("Widget data unavailable for widget_type=%s: %s", widget_type, e.message)
             return {"status": "unavailable", "error_code": "WIDGET_UNAVAILABLE"}
     finally:
         connections.close_all()
