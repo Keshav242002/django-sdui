@@ -8,8 +8,19 @@ import logging
 from typing import Any
 
 from django.core.cache import cache
+from prometheus_client import Counter
 
 logger = logging.getLogger(__name__)
+
+CACHE_REQUESTS = Counter(
+    "sdui_cache_requests_total",
+    "Cache get() calls by domain and result",
+    ["domain", "result"],
+)
+
+
+def _domain(key: str) -> str:
+    return key.split(":", 1)[0] if ":" in key else "unknown"
 
 
 class CacheClient:
@@ -37,8 +48,10 @@ class CacheClient:
 
         if value is None:
             logger.debug("Cache MISS for %s", key)
+            CACHE_REQUESTS.labels(domain=_domain(key), result="miss").inc()
         else:
             logger.debug("Cache HIT for %s", key)
+            CACHE_REQUESTS.labels(domain=_domain(key), result="hit").inc()
         return value
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:

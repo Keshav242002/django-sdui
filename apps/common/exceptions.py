@@ -8,6 +8,7 @@ Anything else is treated as unexpected and surfaced as a generic 500.
 
 import logging
 
+import sentry_sdk
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
@@ -48,8 +49,8 @@ def custom_exception_handler(exc, context):
 
     Expected AppError subclasses are logged as warnings and mapped to their
     declared status code. Everything else is logged as an error with full
-    traceback and returned as a sanitized generic 500 — no raw tracebacks or
-    internal exception messages ever reach the client.
+    traceback, reported to Sentry, and returned as a sanitized generic 500 —
+    no raw tracebacks or internal exception messages ever reach the client.
     """
     if isinstance(exc, AppError):
         logger.warning("Domain error: %s - %s", exc.code, exc.message)
@@ -63,6 +64,7 @@ def custom_exception_handler(exc, context):
         return response
 
     logger.error("Unhandled exception", exc_info=exc)
+    sentry_sdk.capture_exception(exc)
     return Response(
         {
             "error": {
