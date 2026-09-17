@@ -1,8 +1,11 @@
 from django.contrib import admin, messages
+from django.urls import path, reverse
+from django.utils.html import format_html
 
 from apps.common.exceptions import LayoutNotPublished
 from apps.screens.models import LayoutVersion, Screen, Section, WidgetType
 from apps.screens.services import publish_layout
+from apps.screens.views import ScreenPreviewView
 
 
 class SectionInline(admin.TabularInline):
@@ -26,10 +29,33 @@ def publish_layout_action(modeladmin, request, queryset):
 
 @admin.register(Screen)
 class ScreenAdmin(admin.ModelAdmin):
-    list_display = ("key", "name", "created_at", "updated_at")
+    list_display = ("key", "name", "created_at", "updated_at", "preview_link")
     search_fields = ("key", "name")
     inlines = [SectionInline]
     actions = [publish_layout_action]
+
+    def get_urls(self):
+        """
+        Registers the preview URL inside the admin's own namespace
+        (admin/screens/screen/<pk>/preview/) so it gets the admin's
+        `is_staff` authentication for free -- see plan.md Key Decisions #1.
+        """
+        opts = self.model._meta
+        custom_urls = [
+            path(
+                "<int:screen_pk>/preview/",
+                ScreenPreviewView.as_view(),
+                name=f"{opts.app_label}_{opts.model_name}_preview",
+            ),
+        ]
+        return custom_urls + super().get_urls()
+
+    def preview_link(self, obj):
+        opts = self.model._meta
+        url = reverse(f"admin:{opts.app_label}_{opts.model_name}_preview", args=[obj.pk])
+        return format_html('<a href="{}" target="_blank">Preview</a>', url)
+
+    preview_link.short_description = "Preview"
 
 
 @admin.register(WidgetType)

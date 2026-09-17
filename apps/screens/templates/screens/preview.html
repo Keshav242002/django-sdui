@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+{% load static %}
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Preview — {{ screen.name }}</title>
+    <link rel="stylesheet" href="{% static 'screens/preview.css' %}">
+</head>
+<body>
+    <div class="toolbar">
+        <div class="toolbar-title">
+            <strong>{{ screen.name }}</strong>
+            <span class="screen-key">{{ screen.key }}</span>
+        </div>
+
+        <div class="toolbar-toggle">
+            <a class="mode-link {% if mode == 'draft' %}active{% endif %}"
+               href="?mode=draft{% if user_id %}&user_id={{ user_id }}{% endif %}">Draft (Live)</a>
+            <a class="mode-link {% if mode == 'published' %}active{% endif %}"
+               href="?mode=published{% if user_id %}&user_id={{ user_id }}{% endif %}">Published</a>
+        </div>
+
+        <form class="toolbar-user-form" method="get">
+            <input type="hidden" name="mode" value="{{ mode }}">
+            <input type="text" name="user_id" placeholder="user_id (optional)" value="{{ user_id }}">
+            <button type="submit">Go</button>
+        </form>
+    </div>
+
+    {% if empty_state == "not_published" %}
+        <div class="empty-state">This screen has not been published yet. Run "Publish layout" in the admin, then switch back to Published mode.</div>
+    {% elif empty_state == "no_sections" %}
+        <div class="empty-state">This screen has no active sections to preview.</div>
+    {% else %}
+        <div class="preview-container">
+            <div class="phone-frame android">
+                <div class="status-bar">
+                    <span class="time">9:41</span>
+                    <span class="icons">📶 🔋</span>
+                </div>
+                <div class="screen-content"></div>
+                <div class="nav-bar"></div>
+            </div>
+
+            <div class="phone-frame ios">
+                <div class="notch"></div>
+                <div class="screen-content"></div>
+                <div class="home-indicator"></div>
+            </div>
+        </div>
+    {% endif %}
+
+    <script type="application/json" id="sdui-layout-data">{{ layout_json|safe }}</script>
+    <script src="{% static 'screens/preview_renderer.js' %}"></script>
+</body>
+</html>

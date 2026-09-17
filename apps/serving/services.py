@@ -47,7 +47,7 @@ def assemble_screen(
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
-            index: executor.submit(_fetch_section_data, section, user_id)
+            index: executor.submit(fetch_section_data, section, user_id)
             for index, section in enumerate(sections)
         }
         data_by_index = {index: future.result() for index, future in futures.items()}
@@ -66,14 +66,22 @@ def assemble_screen(
     return {"screen_key": screen_key, "layout_version": layout_version, "sections": assembled_sections}
 
 
-def _fetch_section_data(section: dict, user_id: str) -> dict:
+def fetch_section_data(section: dict, user_id: str) -> dict:
     """
     Fetch one section's data, isolating its failure from the rest of the screen.
 
-    Runs on a ThreadPoolExecutor worker thread, which gets its own DB
-    connection that Django's request/response cycle never closes (that
-    cleanup only runs on the main thread). Close it explicitly here so
-    concurrent screen requests don't leak a connection per worker per request.
+    Public (not `_`-prefixed): also called directly by the admin preview
+    (apps/screens/views.py::ScreenPreviewView) so both callers share the
+    exact same bulkhead wrapper instead of the preview reimplementing its
+    own try/except around WIDGET_HANDLERS (rules.md §2, PRD §12A).
+
+    Runs on a ThreadPoolExecutor worker thread when called from
+    assemble_screen(), which gets its own DB connection that Django's
+    request/response cycle never closes (that cleanup only runs on the main
+    thread). Close it explicitly here so concurrent screen requests don't
+    leak a connection per worker per request. When called directly from the
+    preview view (main thread, no executor), this is a harmless no-op
+    beyond forcing a reconnect on the next query.
     """
     try:
         widget_type = section["widget_type"]
