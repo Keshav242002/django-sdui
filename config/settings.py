@@ -9,14 +9,53 @@ See .env.example for all required variables.
 import os
 from pathlib import Path
 
+import sentry_sdk
 from celery.schedules import crontab
 from dotenv import load_dotenv
+from sentry_sdk.integrations.django import DjangoIntegration
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Load environment variables from .env file at project root
 load_dotenv(BASE_DIR / ".env")
+
+# ---------------------------------------------------------------------------
+# prometheus_client multiprocess mode -- the Django web process and the
+# Celery worker process are separate OS processes with separate memory, so
+# a plain in-memory prometheus_client registry in one is invisible to the
+# other. This must be set before prometheus_client is first imported
+# anywhere (apps/common/cache.py, middleware.py, metrics.py), so it lives
+# here, right after load_dotenv(). See apps/common/views.py::metrics_view
+# for the matching MultiProcessCollector read side.
+# ---------------------------------------------------------------------------
+PROMETHEUS_MULTIPROC_DIR = BASE_DIR / ".prometheus_multiproc"
+PROMETHEUS_MULTIPROC_DIR.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", str(PROMETHEUS_MULTIPROC_DIR))
+
+# ---------------------------------------------------------------------------
+# Sentry (PRD §13) — DSN is optional; an empty/missing DSN makes the SDK a
+# documented no-op (never sends events, never errors), so this works
+# identically before and after you create a free-tier Sentry project.
+# traces_sample_rate=1.0 traces every request, profile_session_sample_rate=1.0
+# profiles every traced session -- fine at this project's laptop-scale
+# traffic; turn both down (e.g. 0.1-0.2) if ever pointed at real production
+# volume. send_default_pii=True is safe here since the app only ever handles
+# seeded/mock data (PRD §3 non-goals) -- no real user PII exists to leak.
+# enable_logs is left off -- this project's Sentry plan/project rejects
+# log_item envelopes with a 403 (verified during setup); it's a separate,
+# newer Sentry feature unrelated to error/performance capture, both of
+# which work without it.
+# ---------------------------------------------------------------------------
+
+sentry_sdk.init(
+    dsn=os.environ.get("SENTRY_DSN", ""),
+    integrations=[DjangoIntegration()],
+    send_default_pii=True,
+    traces_sample_rate=1.0,
+    profile_session_sample_rate=1.0,
+    profile_lifecycle="trace",
+)
 
 # ---------------------------------------------------------------------------
 # Security
@@ -58,6 +97,7 @@ REST_FRAMEWORK = {
 }
 
 MIDDLEWARE = [
+    "apps.common.middleware.PrometheusMetricsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
