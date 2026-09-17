@@ -246,7 +246,7 @@ class ScreenPreviewViewTests(TransactionTestCase):
         """
         self.client.force_login(self.staff_user)
 
-        def raising_handler(user_id):
+        def raising_handler(user_id, fund_id=None):
             raise WidgetDataUnavailable("top movers is down")
 
         with patch.dict(widget_registry.WIDGET_HANDLERS, {"horizontal_carousel": raising_handler}):
@@ -261,3 +261,100 @@ class ScreenPreviewViewTests(TransactionTestCase):
         )
         # The other sections are unaffected.
         self.assertEqual(layout["sections"][1]["data"][0]["fund_name"], "Alpha Bluechip Equity Fund")
+
+
+@override_settings(CACHES=TEST_CACHES)
+class FundDetailPreviewTests(TransactionTestCase):
+    """
+    Phase 8: the fund_detail screen's fund_overview/recommended_funds
+    widgets, previewed with a `fund_id` query param (see
+    apps.screens.views.ScreenPreviewView -- same TransactionTestCase
+    reasoning as ScreenPreviewViewTests above).
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.staff_user = User.objects.create_user(
+            username="admin2", password="password", is_staff=True
+        )
+        self.widget_types = {
+            key: WidgetType.objects.create(key=key, name=key)
+            for key in ["fund_overview", "recommended_funds"]
+        }
+        self.screen = Screen.objects.create(key="fund_detail", name="Fund Detail")
+        Section.objects.create(
+            screen=self.screen,
+            widget_type=self.widget_types["fund_overview"],
+            title="Fund Overview",
+            order=1,
+        )
+        Section.objects.create(
+            screen=self.screen,
+            widget_type=self.widget_types["recommended_funds"],
+            title="Recommended Funds",
+            order=2,
+        )
+
+        self.fund = Fund.objects.create(
+            name="Alpha Bluechip Equity Fund",
+            category=Fund.Category.EQUITY,
+            nav=Decimal("145.3200"),
+            one_day_change_pct=Decimal("1.85"),
+        )
+        self.held_fund = Fund.objects.create(
+            name="Beta Debt Fund",
+            category=Fund.Category.DEBT,
+            nav=Decimal("50.0000"),
+            one_day_change_pct=Decimal("2.50"),
+        )
+        self.user_id = uuid.uuid4()
+        portfolio = Portfolio.objects.create(user_id=self.user_id, total_value=Decimal("500.00"))
+        Holding.objects.create(
+            portfolio=portfolio,
+            fund=self.held_fund,
+            units=Decimal("10.0000"),
+            invested_amount=Decimal("500.00"),
+            current_value=Decimal("500.00"),
+        )
+
+    def _preview_url(self, **params):
+        url = f"/admin/screens/screen/{self.screen.pk}/preview/"
+        if params:
+            url += "?" + "&".join(f"{k}={v}" for k, v in params.items())
+        return url
+
+    def _layout(self, response) -> dict:
+        return json.loads(response.context["layout_json"])
+
+    def test_preview_fund_detail_with_fund_id_shows_overview(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(
+            self._preview_url(mode="draft", fund_id=self.fund.pk, user_id=str(self.user_id))
+        )
+
+        self.assertEqual(response.status_code, 200)
+        layout = self._layout(response)
+        overview = layout["sections"][0]["data"]
+        self.assertEqual(overview["name"], "Alpha Bluechip Equity Fund")
+
+        recommended = layout["sections"][1]["data"]
+        recommended_names = [f["name"] for f in recommended]
+        self.assertIn("Alpha Bluechip Equity Fund", recommended_names)
+        self.assertNotIn("Beta Debt Fund", recommended_names)
+
+    def test_preview_fund_detail_without_fund_id_shows_no_fund_selected(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(self._preview_url(mode="draft", user_id=str(self.user_id)))
+
+        layout = self._layout(response)
+        self.assertEqual(layout["sections"][0]["data"], {})
+
+    def test_preview_fund_detail_without_user_id_shows_no_user_selected_for_recommended(self):
+        self.client.force_login(self.staff_user)
+
+        response = self.client.get(self._preview_url(mode="draft", fund_id=self.fund.pk))
+
+        layout = self._layout(response)
+        self.assertEqual(layout["sections"][1]["data"], {"status": "no_user_selected"})

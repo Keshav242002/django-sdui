@@ -15,14 +15,15 @@
 
         <div class="toolbar-toggle">
             <a class="mode-link {% if mode == 'draft' %}active{% endif %}"
-               href="?mode=draft{% if user_id %}&user_id={{ user_id }}{% endif %}">Draft (Live)</a>
+               href="?mode=draft{% if user_id %}&user_id={{ user_id }}{% endif %}{% if fund_id %}&fund_id={{ fund_id }}{% endif %}">Draft (Live)</a>
             <a class="mode-link {% if mode == 'published' %}active{% endif %}"
-               href="?mode=published{% if user_id %}&user_id={{ user_id }}{% endif %}">Published</a>
+               href="?mode=published{% if user_id %}&user_id={{ user_id }}{% endif %}{% if fund_id %}&fund_id={{ fund_id }}{% endif %}">Published</a>
         </div>
 
         <form class="toolbar-user-form" method="get">
             <input type="hidden" name="mode" value="{{ mode }}">
             <input type="text" name="user_id" placeholder="user_id (optional)" value="{{ user_id }}">
+            <input type="text" name="fund_id" placeholder="fund_id (optional)" value="{{ fund_id }}">
             <button type="submit">Go</button>
         </form>
     </div>

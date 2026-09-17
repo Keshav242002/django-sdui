@@ -158,7 +158,7 @@ class ScreenViewTests(ServingTestDataMixin, APITransactionTestCase):
         self.assertEqual(response.data["meta"]["total_sections"], 5)
 
     def test_bulkhead_isolates_one_failing_widget(self):
-        def raising_handler(user_id):
+        def raising_handler(user_id, fund_id=None):
             raise WidgetDataUnavailable("top movers is down")
 
         with patch.dict(widget_registry.WIDGET_HANDLERS, {"horizontal_carousel": raising_handler}):
@@ -268,6 +268,106 @@ class WidgetViewTests(ServingTestDataMixin, APITransactionTestCase):
 
         embedded_data = screen_response.data["data"]["sections"][0]["data"]
         self.assertEqual(embedded_data, widget_response.data["data"])
+
+    def test_fund_overview_widget_returns_data_for_fund_id(self):
+        response = self.client.get(
+            "/api/v1/widgets/fund_overview/",
+            {"user_id": str(self.user_with_data), "fund_id": str(self.fund.pk)},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["name"], "Alpha Bluechip Equity Fund")
+
+    def test_recommended_funds_widget_excludes_held_fund(self):
+        response = self.client.get(
+            "/api/v1/widgets/recommended_funds/", {"user_id": str(self.user_with_data)}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [f["name"] for f in response.data["data"]]
+        self.assertNotIn("Alpha Bluechip Equity Fund", names)
+
+    def test_recommended_funds_widget_no_exclusion_for_user_without_holdings(self):
+        response = self.client.get(
+            "/api/v1/widgets/recommended_funds/", {"user_id": str(self.user_without_data)}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        names = [f["name"] for f in response.data["data"]]
+        self.assertIn("Alpha Bluechip Equity Fund", names)
+
+
+@override_settings(CACHES=TEST_CACHES)
+class FundDetailScreenTests(APITransactionTestCase):
+    """
+    Phase 8: the fund_detail screen end-to-end through ScreenView, proving
+    fund_id reaches the handlers and the recommended-funds exclusion holds
+    for a real aggregator request, not just the standalone widget endpoint.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.widget_types = {
+            key: WidgetType.objects.create(key=key, name=key)
+            for key in ["fund_overview", "recommended_funds"]
+        }
+        self.screen = Screen.objects.create(key="fund_detail", name="Fund Detail")
+        Section.objects.create(
+            screen=self.screen,
+            widget_type=self.widget_types["fund_overview"],
+            title="Fund Overview",
+            order=1,
+        )
+        Section.objects.create(
+            screen=self.screen,
+            widget_type=self.widget_types["recommended_funds"],
+            title="Recommended Funds",
+            order=2,
+        )
+
+        self.fund = Fund.objects.create(
+            name="Alpha Bluechip Equity Fund",
+            category=Fund.Category.EQUITY,
+            nav=Decimal("145.3200"),
+            one_day_change_pct=Decimal("1.85"),
+        )
+        self.held_fund = Fund.objects.create(
+            name="Beta Debt Fund",
+            category=Fund.Category.DEBT,
+            nav=Decimal("50.0000"),
+            one_day_change_pct=Decimal("2.50"),
+        )
+        self.user_id = uuid.uuid4()
+        portfolio = Portfolio.objects.create(user_id=self.user_id, total_value=Decimal("500.00"))
+        Holding.objects.create(
+            portfolio=portfolio,
+            fund=self.held_fund,
+            units=Decimal("10.0000"),
+            invested_amount=Decimal("500.00"),
+            current_value=Decimal("500.00"),
+        )
+
+    def test_screen_view_passes_fund_id_and_excludes_held_funds(self):
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/",
+            {"user_id": str(self.user_id), "fund_id": str(self.fund.pk)},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        sections = response.data["data"]["sections"]
+        self.assertEqual(sections[0]["data"]["name"], "Alpha Bluechip Equity Fund")
+
+        recommended_names = [f["name"] for f in sections[1]["data"]]
+        self.assertIn("Alpha Bluechip Equity Fund", recommended_names)
+        self.assertNotIn("Beta Debt Fund", recommended_names)
+
+    def test_screen_view_without_fund_id_returns_empty_overview(self):
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_id)}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["sections"][0]["data"], {})
 
 
 @override_settings(CACHES=TEST_CACHES)

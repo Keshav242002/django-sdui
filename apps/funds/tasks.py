@@ -37,9 +37,11 @@ from kombu.exceptions import OperationalError as BrokerOperationalError
 from apps.common.cache import cache_client, widget_cache_key
 from apps.funds.models import FailedTaskRecompute, Fund, Portfolio
 from apps.funds.services import (
+    RECOMMENDED_FUNDS_TTL,
     TOP_MOVERS_TTL,
     TRENDING_FUNDS_TTL,
     _serialize_fund_rows,
+    _serialize_recommendable_fund_rows,
     compute_portfolio_snapshot,
 )
 
@@ -63,6 +65,16 @@ def recompute_trending() -> dict:
     data = _serialize_fund_rows(funds)
     cache_client.set(widget_cache_key("trending_funds"), data, ttl=TRENDING_FUNDS_TTL)
     logger.info("recompute_trending: wrote %d rows", len(data))
+    return {"rows": len(data)}
+
+
+@shared_task(ignore_result=True)
+def recompute_recommended_funds() -> dict:
+    """Beat: every 15 min (config.settings.CELERY_BEAT_SCHEDULE)."""
+    funds = Fund.objects.order_by("-one_day_change_pct")[:10]
+    data = _serialize_recommendable_fund_rows(funds)
+    cache_client.set(widget_cache_key("recommended_funds"), data, ttl=RECOMMENDED_FUNDS_TTL)
+    logger.info("recompute_recommended_funds: wrote %d rows", len(data))
     return {"rows": len(data)}
 
 

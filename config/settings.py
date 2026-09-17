@@ -198,6 +198,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.funds.tasks.recompute_trending",
         "schedule": 900.0,  # every 15 min (PRD §10)
     },
+    "recompute-recommended-funds": {
+        "task": "apps.funds.tasks.recompute_recommended_funds",
+        "schedule": 900.0,  # every 15 min, mirrors recompute-trending (Phase 8)
+    },
     "recompute-all-portfolio-snapshots": {
         "task": "apps.funds.tasks.recompute_all_portfolio_snapshots",
         "schedule": crontab(hour=1, minute=30),  # daily, post-NAV window (PRD §9A)

@@ -21,6 +21,16 @@ TOP_MOVERS_TTL = 600  # 2x the 5 min beat schedule
 TRENDING_FUNDS_TTL = 1800  # 2x the 15 min beat schedule
 PORTFOLIO_SUMMARY_TTL = 60
 HOLDINGS_TTL = 60
+# 2x the 15 min recompute_recommended_funds beat schedule -- same
+# half-lifetime-refresh reasoning as TRENDING_FUNDS_TTL (Phase 8 plan.md
+# Key Decision #1).
+RECOMMENDED_FUNDS_TTL = 1800
+# Not precomputed, unlike the widgets above -- a single indexed-PK read is
+# not the "expensive computation" PRD §9A guards against. 60s matches
+# PORTFOLIO_SUMMARY_TTL/HOLDINGS_TTL: Fund.nav changes at most once daily,
+# but a fund detail page may be hit repeatedly in one browsing session, so
+# a short TTL absorbs that repeat traffic (Phase 8 plan.md Key Decision #4).
+FUND_OVERVIEW_TTL = 60
 
 
 def _quantize_money(value: Decimal) -> Decimal:
@@ -28,13 +38,18 @@ def _quantize_money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"))
 
 
-def get_portfolio_summary(user_id: str) -> dict:
+def get_portfolio_summary(user_id: str, fund_id: str | None = None) -> dict:
     """
     Read the latest PortfolioSnapshot for a user and return it as a dict.
 
     Cache-first: Redis (`portfolio:{user_id}:summary`, 60s TTL) then Postgres.
     Never recomputes here -- the snapshot is written by
     compute_portfolio_snapshot() (Celery task, Phase 5 / PRD §9A).
+
+    `fund_id` is accepted (and ignored) so this function keeps the uniform
+    `handler(user_id, fund_id=None)` contract every WIDGET_HANDLERS entry
+    now shares (Phase 8 plan.md Key Decision #2) -- this widget has no use
+    for it.
     """
     cache_key = portfolio_cache_key(user_id)
     cached = cache_client.get(cache_key)
@@ -60,11 +75,14 @@ def get_portfolio_summary(user_id: str) -> dict:
     return data
 
 
-def get_holdings_data(user_id: str) -> list[dict]:
+def get_holdings_data(user_id: str, fund_id: str | None = None) -> list[dict]:
     """
     Return every Holding for a user's portfolio.
 
     Cache-first: Redis (`holdings:{user_id}:list`, 60s TTL) then Postgres.
+
+    `fund_id` is accepted (and ignored) -- see get_portfolio_summary()'s
+    docstring; same uniform handler contract, unused here.
     """
     cache_key = holdings_cache_key(user_id)
     cached = cache_client.get(cache_key)
@@ -137,6 +155,91 @@ def get_trending_funds_data(limit: int = 10) -> list[dict]:
 
     cache_client.set(cache_key, data, ttl=TRENDING_FUNDS_TTL)
     return data
+
+
+def get_fund_overview_data(user_id: str, fund_id: str | None = None) -> dict:
+    """
+    Return one Fund's overview (name, category, nav, one_day_change_pct).
+
+    Cache-first: Redis (`fund_overview:{fund_id}`, 60s TTL) then a single
+    indexed-PK Postgres read. Returns {} (not an error) when fund_id is
+    falsy or the fund doesn't exist -- same "no data, not a failure"
+    convention as get_portfolio_summary() (Phase 8 plan.md Key Decision #4).
+
+    `user_id` is accepted (and ignored) to keep the uniform
+    `handler(user_id, fund_id=None)` contract -- this widget has no use
+    for it.
+    """
+    if not fund_id:
+        return {}
+
+    cache_key = f"fund_overview:{fund_id}"
+    cached = cache_client.get(cache_key)
+    if cached is not None:
+        return cached
+
+    fund = Fund.objects.filter(pk=fund_id).first()
+    if fund is None:
+        return {}
+
+    data = {
+        "name": fund.name,
+        "category": fund.category,
+        "nav": fund.nav,
+        "one_day_change_pct": fund.one_day_change_pct,
+    }
+
+    cache_client.set(cache_key, data, ttl=FUND_OVERVIEW_TTL)
+    return data
+
+
+def _serialize_recommendable_fund_rows(funds) -> list[dict]:
+    """
+    Like _serialize_fund_rows(), plus `id` -- the recommended-funds pool
+    needs a real, unique key to exclude held funds by (Phase 8 plan.md Key
+    Decision #1). Fund.name has no uniqueness constraint, so matching by
+    name the way _serialize_fund_rows()'s shape would invite would be
+    unreliable; `id` is the PK. Kept as its own function rather than
+    changing _serialize_fund_rows() itself, since that shape is also the
+    top-movers/trending API response shape and isn't part of this phase's
+    scope to change.
+    """
+    return [
+        {
+            "id": fund.id,
+            "name": fund.name,
+            "nav": fund.nav,
+            "one_day_change_pct": fund.one_day_change_pct,
+        }
+        for fund in funds
+    ]
+
+
+def get_recommended_funds_data(user_id: str, fund_id: str | None = None) -> list[dict]:
+    """
+    Return a ranked pool of recommended funds, excluding funds the
+    requesting user already holds.
+
+    Cache-first for the pool: Redis (`widget:recommended_funds`, 30 min
+    TTL) then Postgres, same pattern as get_top_movers_data(). The
+    exclusion is one bounded query against the user's Holding rows (same
+    shape as get_holdings_data()'s filter) -- not one query per fund in
+    the pool (Phase 8 plan.md Key Decision #1).
+
+    `fund_id` is accepted (and ignored) -- this widget is not scoped to a
+    single fund, but shares the uniform handler contract.
+    """
+    cache_key = widget_cache_key("recommended_funds")
+    pool = cache_client.get(cache_key)
+    if pool is None:
+        funds = Fund.objects.order_by("-one_day_change_pct")[:10]
+        pool = _serialize_recommendable_fund_rows(funds)
+        cache_client.set(cache_key, pool, ttl=RECOMMENDED_FUNDS_TTL)
+
+    held_fund_ids = set(
+        Holding.objects.filter(portfolio__user_id=user_id).values_list("fund_id", flat=True)
+    )
+    return [fund for fund in pool if fund["id"] not in held_fund_ids]
 
 
 def apply_transaction_to_holding(transaction: Transaction) -> None:

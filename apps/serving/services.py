@@ -27,7 +27,11 @@ logger = logging.getLogger(__name__)
 
 
 def assemble_screen(
-    screen_key: str, user_id: str, platform: str = "", app_version: str = "0.0.0"
+    screen_key: str,
+    user_id: str,
+    platform: str = "",
+    app_version: str = "0.0.0",
+    fund_id: str | None = None,
 ) -> dict:
     """
     Assemble the full screen response for a given user.
@@ -35,6 +39,10 @@ def assemble_screen(
     `platform` is accepted (mirrors the PRD §9 request signature) but not
     used for filtering in this phase -- only `min_app_version` gates a
     section today.
+
+    `fund_id` (Phase 8) is passed through to each section's handler for
+    fund-scoped screens like `fund_detail` (e.g. `fund_overview`,
+    `recommended_funds`); widgets that don't use it ignore it.
     """
     layout = get_active_sections(screen_key)
     layout_version = layout["version_number"]
@@ -47,7 +55,7 @@ def assemble_screen(
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
-            index: executor.submit(fetch_section_data, section, user_id)
+            index: executor.submit(fetch_section_data, section, user_id, fund_id)
             for index, section in enumerate(sections)
         }
         data_by_index = {index: future.result() for index, future in futures.items()}
@@ -66,9 +74,13 @@ def assemble_screen(
     return {"screen_key": screen_key, "layout_version": layout_version, "sections": assembled_sections}
 
 
-def fetch_section_data(section: dict, user_id: str) -> dict:
+def fetch_section_data(section: dict, user_id: str, fund_id: str | None = None) -> dict:
     """
     Fetch one section's data, isolating its failure from the rest of the screen.
+
+    `fund_id` (Phase 8) is passed through to the widget handler, which
+    accepts (and most ignore) it -- see apps.serving.widget_registry's
+    uniform `handler(user_id, fund_id=None)` contract.
 
     Public (not `_`-prefixed): also called directly by the admin preview
     (apps/screens/views.py::ScreenPreviewView) so both callers share the
@@ -90,7 +102,7 @@ def fetch_section_data(section: dict, user_id: str) -> dict:
             return {"status": "unavailable", "error_code": "WIDGET_UNKNOWN"}
 
         try:
-            return handler(user_id)
+            return handler(user_id, fund_id=fund_id)
         except AppError as e:
             logger.warning("Widget data unavailable for widget_type=%s: %s", widget_type, e.message)
             return {"status": "unavailable", "error_code": "WIDGET_UNAVAILABLE"}

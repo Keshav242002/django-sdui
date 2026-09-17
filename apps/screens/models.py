@@ -1,4 +1,7 @@
+from django.core.exceptions import ValidationError
 from django.db import models
+
+BADGE_TEXT_MAX_LENGTH = 24
 
 
 class Screen(models.Model):
@@ -43,6 +46,30 @@ class Section(models.Model):
 
     def __str__(self):
         return f"{self.screen.key} / {self.widget_type.key} ({self.order})"
+
+    def clean(self):
+        """
+        Validate the optional `badge_text` content field inside `config`.
+
+        Deliberately content-only, not visual: coloring/theming is not
+        server-configurable (Phase 8 revision -- brand theme is owned by
+        the client's fixed design system, matching how production SDUI
+        systems at this scale actually split the concern; only the admin
+        preview tool applies any color, and that's hardcoded per widget
+        type in preview_renderer.js, never read from Section.config). This
+        field is just a short label (e.g. "NEW") the client renders as-is.
+
+        Only fires through ModelForm.full_clean() -- i.e. the Django Admin,
+        the only path that writes Section rows in this project today. Direct
+        ORM writes (a future management command/migration touching
+        Section.config) bypass this -- a documented gap, not a guarantee.
+        """
+        super().clean()
+        badge_text = (self.config or {}).get("badge_text")
+        if badge_text is not None and len(str(badge_text)) > BADGE_TEXT_MAX_LENGTH:
+            raise ValidationError(
+                {"config": f"badge_text must be {BADGE_TEXT_MAX_LENGTH} characters or fewer."}
+            )
 
 
 class LayoutVersion(models.Model):

@@ -56,7 +56,7 @@ body {
     border: 1px solid #33335a;
     background: #0f0f23;
     color: #eaeaea;
-    width: 320px;
+    width: 200px;
 }
 
 .toolbar-user-form button {
@@ -170,11 +170,24 @@ body {
     padding: 14px 16px;
     margin-bottom: 12px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    border-left: 4px solid transparent;
 }
 
 .widget-card h3 {
     margin: 0 0 8px;
     font-size: 0.95em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.widget-card .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7em;
+    font-weight: 600;
+    color: #fff;
 }
 
 .widget-card .empty {
