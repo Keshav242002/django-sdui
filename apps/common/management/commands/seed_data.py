@@ -29,9 +29,10 @@ Seeded portfolio user_ids (fixed, hardcoded so they are stable across runs)
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand
+from django.db.models.signals import post_save
 
 from apps.flags.models import FeatureFlag
-from apps.funds.models import Fund, Holding, Portfolio, Transaction
+from apps.funds.models import Fund, Holding, Portfolio, Transaction, on_transaction_saved
 from apps.screens.models import Screen, Section, WidgetType
 
 USER_1 = "aaaaaaaa-0001-0001-0001-000000000001"
@@ -75,7 +76,24 @@ class Command(BaseCommand):
         self._seed_screens_and_sections(widget_types)
         funds = self._seed_funds()
         self._seed_feature_flag()
-        self._seed_portfolios(funds)
+
+        # _seed_portfolios sets each Holding directly to its intended final
+        # units/invested_amount/current_value, *and* separately writes a
+        # matching BUY Transaction as an audit-trail record -- it treats
+        # the two as independently-given starting state, not one derived
+        # from the other. Since Phase 5, on_transaction_saved (see
+        # apps.funds.models) applies every newly-created Transaction to its
+        # Holding -- with the signal connected, creating that BUY
+        # Transaction would add its units to the Holding a second time, on
+        # top of the value get_or_create() just set explicitly. Disconnected
+        # here, for this command only, so seeding writes exactly the values
+        # given above.
+        post_save.disconnect(on_transaction_saved, sender=Transaction)
+        try:
+            self._seed_portfolios(funds)
+        finally:
+            post_save.connect(on_transaction_saved, sender=Transaction)
+
         self.stdout.write(self.style.SUCCESS("Seed data created successfully."))
 
     def _seed_widget_types(self):
