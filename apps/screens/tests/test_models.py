@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase
 
@@ -21,6 +22,42 @@ class SectionModelTests(TestCase):
 
         orders = list(screen.sections.values_list("order", flat=True))
         self.assertEqual(orders, [1, 2, 3])
+
+
+class SectionBadgeTextValidationTests(TestCase):
+    """
+    Section.clean() validates the optional config.badge_text content
+    field. No color/theming validation here -- coloring is not
+    server-configurable (Phase 8 revision, see models.py::Section.clean()
+    docstring); only badge_text (a short label) is admin-authored data.
+    clean() is invoked directly (not full_clean()), exercising exactly
+    the method the Admin's ModelForm calls.
+    """
+
+    def setUp(self):
+        self.screen = Screen.objects.create(key="mf_dashboard", name="MF Dashboard")
+        self.widget_type = WidgetType.objects.create(key="grid", name="Grid")
+
+    def _section(self, badge_text):
+        return Section(
+            screen=self.screen,
+            widget_type=self.widget_type,
+            order=1,
+            config={"badge_text": badge_text},
+        )
+
+    def test_rejects_badge_text_over_max_length(self):
+        section = self._section("x" * 25)
+        with self.assertRaises(ValidationError):
+            section.clean()
+
+    def test_accepts_badge_text_at_max_length(self):
+        section = self._section("x" * 24)
+        section.clean()  # does not raise
+
+    def test_no_badge_text_is_valid(self):
+        section = Section(screen=self.screen, widget_type=self.widget_type, order=1, config={})
+        section.clean()  # does not raise
 
 
 class LayoutVersionModelTests(TestCase):

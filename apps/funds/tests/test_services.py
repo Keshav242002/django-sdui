@@ -7,8 +7,10 @@ from django.test import TestCase, override_settings
 
 from apps.funds.models import Fund, Holding, Portfolio, PortfolioSnapshot
 from apps.funds.services import (
+    get_fund_overview_data,
     get_holdings_data,
     get_portfolio_summary,
+    get_recommended_funds_data,
     get_top_movers_data,
     get_trending_funds_data,
 )
@@ -147,3 +149,99 @@ class GetTrendingFundsDataTests(FundsServicesTestCase):
 
         mock_model.objects.filter.assert_not_called()
         self.assertEqual(result[0]["name"], "Trending")
+
+
+class GetFundOverviewDataTests(FundsServicesTestCase):
+    def test_returns_fund_data_for_known_fund_id(self):
+        fund = Fund.objects.create(
+            name="Alpha Equity Fund", category=Fund.Category.EQUITY, nav=100, one_day_change_pct=1.5
+        )
+
+        result = get_fund_overview_data(str(uuid.uuid4()), fund_id=str(fund.pk))
+
+        self.assertEqual(result["name"], "Alpha Equity Fund")
+        self.assertEqual(result["category"], Fund.Category.EQUITY)
+
+    def test_returns_empty_dict_for_unknown_fund_id(self):
+        result = get_fund_overview_data(str(uuid.uuid4()), fund_id="999999")
+        self.assertEqual(result, {})
+
+    def test_returns_empty_dict_when_fund_id_not_given(self):
+        result = get_fund_overview_data(str(uuid.uuid4()), fund_id=None)
+        self.assertEqual(result, {})
+
+    def test_second_call_hits_cache_no_second_query(self):
+        fund = Fund.objects.create(
+            name="Alpha Equity Fund", category=Fund.Category.EQUITY, nav=100, one_day_change_pct=1.5
+        )
+
+        get_fund_overview_data(str(uuid.uuid4()), fund_id=str(fund.pk))
+
+        with patch("apps.funds.services.Fund") as mock_model:
+            result = get_fund_overview_data(str(uuid.uuid4()), fund_id=str(fund.pk))
+
+        mock_model.objects.filter.assert_not_called()
+        self.assertEqual(result["name"], "Alpha Equity Fund")
+
+
+class GetRecommendedFundsDataTests(FundsServicesTestCase):
+    def test_excludes_held_funds(self):
+        held_fund = Fund.objects.create(
+            name="Held Fund", category=Fund.Category.EQUITY, nav=100, one_day_change_pct="2.40"
+        )
+        Fund.objects.create(
+            name="Other Fund", category=Fund.Category.EQUITY, nav=100, one_day_change_pct="1.10"
+        )
+        portfolio = Portfolio.objects.create(user_id=uuid.uuid4(), total_value=1000)
+        Holding.objects.create(
+            portfolio=portfolio, fund=held_fund, units=10, invested_amount=1000, current_value=1050
+        )
+
+        result = get_recommended_funds_data(str(portfolio.user_id))
+
+        names = [f["name"] for f in result]
+        self.assertNotIn("Held Fund", names)
+        self.assertIn("Other Fund", names)
+
+    def test_user_with_no_holdings_sees_full_pool(self):
+        Fund.objects.create(
+            name="Some Fund", category=Fund.Category.EQUITY, nav=100, one_day_change_pct="2.40"
+        )
+
+        result = get_recommended_funds_data(str(uuid.uuid4()))
+
+        self.assertEqual([f["name"] for f in result], ["Some Fund"])
+
+    def test_exclusion_runs_exactly_one_query_on_a_warm_pool(self):
+        """
+        Guards Phase 8 plan.md Key Decision #1: the held-fund exclusion is
+        one bounded query against the user's Holding rows, never one query
+        per fund in the pool. The pool itself is cached after the first
+        call, so a second call should cost exactly one query (the
+        exclusion) -- not (1 + pool size).
+        """
+        held_fund = Fund.objects.create(
+            name="Held Fund", category=Fund.Category.EQUITY, nav=100, one_day_change_pct="9.99"
+        )
+        for i in range(5):
+            Fund.objects.create(
+                name=f"Fund {i}", category=Fund.Category.EQUITY, nav=100, one_day_change_pct=str(i)
+            )
+        portfolio = Portfolio.objects.create(user_id=uuid.uuid4(), total_value=1000)
+        Holding.objects.create(
+            portfolio=portfolio, fund=held_fund, units=10, invested_amount=1000, current_value=1050
+        )
+
+        get_recommended_funds_data(str(portfolio.user_id))  # warms the pool cache
+
+        with self.assertNumQueries(1):
+            get_recommended_funds_data(str(portfolio.user_id))
+
+    def test_cache_miss_falls_back_to_postgres(self):
+        Fund.objects.create(
+            name="High", category=Fund.Category.EQUITY, nav=100, one_day_change_pct="2.40"
+        )
+
+        result = get_recommended_funds_data(str(uuid.uuid4()))
+
+        self.assertEqual(result[0]["name"], "High")

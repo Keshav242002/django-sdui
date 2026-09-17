@@ -51,6 +51,8 @@ WIDGET_TYPES = [
     {"key": "holdings_list", "name": "Holdings List", "schema": {}},
     {"key": "horizontal_carousel", "name": "Horizontal Carousel", "schema": {}},
     {"key": "grid", "name": "Grid", "schema": {}},
+    {"key": "fund_overview", "name": "Fund Overview", "schema": {}},
+    {"key": "recommended_funds", "name": "Recommended Funds", "schema": {}},
 ]
 
 FUNDS = [
@@ -109,17 +111,31 @@ class Command(BaseCommand):
         mf_dashboard, _ = Screen.objects.get_or_create(
             key="mf_dashboard", defaults={"name": "Mutual Fund Dashboard"}
         )
-        Screen.objects.get_or_create(key="fund_detail", defaults={"name": "Fund Detail"})
+        fund_detail, _ = Screen.objects.get_or_create(
+            key="fund_detail", defaults={"name": "Fund Detail"}
+        )
 
-        sections = [
+        mf_dashboard_sections = [
             ("portfolio_summary", "Your Portfolio", 1),
             ("holdings_list", "Your Holdings", 2),
             ("horizontal_carousel", "Top Movers", 3),
             ("grid", "Trending Funds", 4),
         ]
-        for widget_key, title, order in sections:
+        for widget_key, title, order in mf_dashboard_sections:
             Section.objects.get_or_create(
                 screen=mf_dashboard,
+                widget_type=widget_types[widget_key],
+                order=order,
+                defaults={"title": title, "is_active": True},
+            )
+
+        fund_detail_sections = [
+            ("fund_overview", "Fund Overview", 1),
+            ("recommended_funds", "Recommended Funds", 2),
+        ]
+        for widget_key, title, order in fund_detail_sections:
+            Section.objects.get_or_create(
+                screen=fund_detail,
                 widget_type=widget_types[widget_key],
                 order=order,
                 defaults={"title": title, "is_active": True},

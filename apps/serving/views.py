@@ -25,6 +25,7 @@ class ScreenView(APIView):
             user_id=str(params["user_id"]),
             platform=params.get("platform", ""),
             app_version=params.get("app_version", "0.0.0"),
+            fund_id=params.get("fund_id") or None,
         )
         return Response(
             {
@@ -63,6 +64,7 @@ class WidgetView(APIView):
         serializer = WidgetRequestSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
         user_id = str(serializer.validated_data["user_id"])
+        fund_id = serializer.validated_data.get("fund_id") or None
 
-        result = handler(user_id)
+        result = handler(user_id, fund_id=fund_id)
         return Response({"data": result, "meta": {"widget_key": widget_key}})

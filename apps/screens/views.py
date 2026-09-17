@@ -23,12 +23,13 @@ from apps.serving.services import fetch_section_data
 logger = logging.getLogger(__name__)
 
 # Widget types whose handler reads real per-user data (portfolio_summary ->
-# get_portfolio_summary, holdings_list -> get_holdings_data). The aggregator
+# get_portfolio_summary, holdings_list -> get_holdings_data, recommended_funds
+# -> get_recommended_funds_data's held-fund exclusion query). The aggregator
 # never needs this distinction because its DRF serializer always supplies a
 # real, validated user_id (apps/serving/serializers.py). The preview is the
 # one caller that can have no user selected at all, so it needs to know
 # which sections to skip rather than query a UUIDField with an empty string.
-PERSONALIZED_WIDGET_TYPES = {"portfolio_summary", "holdings_list"}
+PERSONALIZED_WIDGET_TYPES = {"portfolio_summary", "holdings_list", "recommended_funds"}
 
 
 @method_decorator(staff_member_required, name="dispatch")
@@ -49,11 +50,13 @@ class ScreenPreviewView(View):
         if mode not in ("draft", "published"):
             mode = "draft"
         user_id = self._parse_user_id(request.GET.get("user_id", ""))
+        fund_id = request.GET.get("fund_id", "") or None
 
         sections, layout_version, empty_state = self._load_sections(screen.key, mode)
 
         assembled_sections = [
-            {**section, "data": self._fetch_widget_data(section, user_id)} for section in sections
+            {**section, "data": self._fetch_widget_data(section, user_id, fund_id)}
+            for section in sections
         ]
 
         layout_json = {
@@ -66,6 +69,7 @@ class ScreenPreviewView(View):
             "screen": screen,
             "mode": mode,
             "user_id": str(user_id) if user_id else "",
+            "fund_id": fund_id or "",
             "empty_state": empty_state,
             # `</` broken up so a fund/section name containing "</script>"
             # can't terminate the injected <script> block early (XSS via
@@ -107,7 +111,7 @@ class ScreenPreviewView(View):
             return None
 
     @staticmethod
-    def _fetch_widget_data(section: dict, user_id: UUID | None) -> dict:
+    def _fetch_widget_data(section: dict, user_id: UUID | None, fund_id: str | None = None) -> dict:
         if section["widget_type"] in PERSONALIZED_WIDGET_TYPES and user_id is None:
             return {"status": "no_user_selected"}
-        return fetch_section_data(section, str(user_id) if user_id else "")
+        return fetch_section_data(section, str(user_id) if user_id else "", fund_id)
