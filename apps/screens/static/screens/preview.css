@@ -1,0 +1,207 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #1a1a2e;
+    color: #eaeaea;
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 12px 20px;
+    background: #16213e;
+    border-bottom: 1px solid #2a2a4a;
+    flex-wrap: wrap;
+}
+
+.toolbar-title .screen-key {
+    color: #8888aa;
+    margin-left: 8px;
+    font-size: 0.85em;
+}
+
+.toolbar-toggle {
+    display: flex;
+    gap: 4px;
+}
+
+.mode-link {
+    padding: 6px 14px;
+    border-radius: 16px;
+    color: #ccccdd;
+    text-decoration: none;
+    font-size: 0.9em;
+    background: #24243e;
+}
+
+.mode-link.active {
+    background: #4e6ef2;
+    color: #fff;
+}
+
+.toolbar-user-form {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.toolbar-user-form input {
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #33335a;
+    background: #0f0f23;
+    color: #eaeaea;
+    width: 320px;
+}
+
+.toolbar-user-form button {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: none;
+    background: #4e6ef2;
+    color: #fff;
+    cursor: pointer;
+}
+
+.empty-state {
+    max-width: 600px;
+    margin: 80px auto;
+    text-align: center;
+    color: #aaaacc;
+    font-size: 1.1em;
+    padding: 24px;
+}
+
+.preview-container {
+    display: flex;
+    justify-content: center;
+    gap: 48px;
+    padding: 48px 24px;
+    flex-wrap: wrap;
+}
+
+.phone-frame {
+    position: relative;
+    width: 375px;
+    height: 812px;
+    background: #f5f5f7;
+    border-radius: 40px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    color: #1a1a2e;
+}
+
+.phone-frame .screen-content {
+    position: absolute;
+    top: 44px;
+    bottom: 40px;
+    left: 0;
+    right: 0;
+    overflow-y: auto;
+    padding: 12px;
+}
+
+.phone-frame.android {
+    border-radius: 20px;
+    border: 6px solid #2a2a2a;
+}
+
+.phone-frame.android .status-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 14px;
+    font-size: 0.75em;
+    background: #f5f5f7;
+}
+
+.phone-frame.android .screen-content {
+    top: 28px;
+    bottom: 24px;
+}
+
+.phone-frame.android .nav-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 24px;
+    background: #e4e4e8;
+}
+
+.phone-frame.ios .notch {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 210px;
+    height: 30px;
+    background: #000;
+    border-bottom-left-radius: 18px;
+    border-bottom-right-radius: 18px;
+    z-index: 2;
+}
+
+.phone-frame.ios .home-indicator {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 134px;
+    height: 5px;
+    border-radius: 3px;
+    background: #1a1a2e;
+    opacity: 0.6;
+}
+
+.widget-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.widget-card h3 {
+    margin: 0 0 8px;
+    font-size: 0.95em;
+}
+
+.widget-card .empty {
+    color: #9999aa;
+    font-size: 0.9em;
+    font-style: italic;
+}
+
+.widget-card .unknown-badge {
+    display: inline-block;
+    background: #ddd;
+    color: #555;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+}
+
+.holding-row,
+.fund-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 0.9em;
+}
+
+.holding-row:last-child,
+.fund-row:last-child {
+    border-bottom: none;
+}

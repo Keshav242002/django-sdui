@@ -157,3 +157,55 @@ def get_active_sections(screen_key: str) -> dict:
         raise LayoutNotPublished(f"Screen '{screen_key}' has no active sections.")
 
     return {"version_number": None, "sections": _snapshot_sections(sections)}
+
+
+def get_draft_sections(screen_key: str) -> dict:
+    """
+    Return the current live Section rows for a screen, in the same shape
+    as get_active_sections() ({version_number, sections}) but reading
+    directly from Postgres, never from cache or LayoutVersion. Used by the
+    admin preview (plan.md Key Decisions #2/#8) to show what a Publish
+    *would* produce.
+
+    version_number is always None -- draft has no version (same convention
+    as the live-fallback tier of get_active_sections). Raises
+    LayoutNotPublished if the screen doesn't exist or has no active
+    sections, matching get_active_sections' error contract.
+    """
+    try:
+        screen = Screen.objects.get(key=screen_key)
+    except Screen.DoesNotExist:
+        raise LayoutNotPublished(f"No screen found for key '{screen_key}'.")
+
+    sections = list(
+        screen.sections.filter(is_active=True).select_related("widget_type").order_by("order")
+    )
+    if not sections:
+        raise LayoutNotPublished(f"Screen '{screen_key}' has no active sections.")
+
+    return {"version_number": None, "sections": _snapshot_sections(sections)}
+
+
+def get_published_sections(screen_key: str) -> dict | None:
+    """
+    Return the current published LayoutVersion snapshot for a screen, or
+    None if the screen has never been published.
+
+    Unlike get_active_sections(), this never falls back to live Section
+    rows. The admin preview's "Published" mode must show exactly what real
+    end users are seeing right now -- falling back to live sections here
+    would silently defeat the draft/published distinction the preview
+    exists to demonstrate, for any screen that hasn't been published yet
+    (plan.md Key Decisions #2).
+
+    Raises LayoutNotPublished if the screen doesn't exist.
+    """
+    try:
+        screen = Screen.objects.get(key=screen_key)
+    except Screen.DoesNotExist:
+        raise LayoutNotPublished(f"No screen found for key '{screen_key}'.")
+
+    layout_version = screen.layout_versions.filter(is_current=True).first()
+    if layout_version is None:
+        return None
+    return layout_version.sections_snapshot

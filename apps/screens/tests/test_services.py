@@ -7,7 +7,12 @@ from kombu.exceptions import OperationalError
 from apps.common.cache import layout_cache_key
 from apps.common.exceptions import LayoutNotPublished
 from apps.screens.models import LayoutVersion, Screen, Section, WidgetType
-from apps.screens.services import get_active_sections, publish_layout
+from apps.screens.services import (
+    get_active_sections,
+    get_draft_sections,
+    get_published_sections,
+    publish_layout,
+)
 from apps.screens.tasks import warm_layout_cache
 
 TEST_CACHES = {
@@ -163,3 +168,79 @@ class GetActiveSectionsTests(ScreensServicesTestCase):
         result = get_active_sections(self.screen.key)
 
         self.assertEqual(result["sections"][0]["title"], "Your Portfolio")
+
+
+class GetDraftSectionsTests(ScreensServicesTestCase):
+    def test_get_draft_sections_returns_live_rows(self):
+        """Draft reads live Section rows even when a LayoutVersion already exists."""
+        self._publish()
+        Section.objects.create(
+            screen=self.screen,
+            widget_type=self.widget_type,
+            title="Newly Added, Not Published",
+            order=2,
+        )
+
+        result = get_draft_sections(self.screen.key)
+
+        self.assertIsNone(result["version_number"])
+        titles = [s["title"] for s in result["sections"]]
+        self.assertIn("Newly Added, Not Published", titles)
+
+    def test_get_draft_sections_ignores_inactive(self):
+        Section.objects.create(
+            screen=self.screen,
+            widget_type=self.widget_type,
+            title="Inactive Section",
+            order=2,
+            is_active=False,
+        )
+
+        result = get_draft_sections(self.screen.key)
+
+        titles = [s["title"] for s in result["sections"]]
+        self.assertNotIn("Inactive Section", titles)
+
+    def test_get_draft_sections_no_sections_raises(self):
+        self.section.is_active = False
+        self.section.save()
+
+        with self.assertRaises(LayoutNotPublished):
+            get_draft_sections(self.screen.key)
+
+
+class GetPublishedSectionsTests(ScreensServicesTestCase):
+    def test_returns_current_layout_version_snapshot(self):
+        self._publish()
+
+        result = get_published_sections(self.screen.key)
+
+        self.assertEqual(result["version_number"], 1)
+
+    def test_returns_none_when_never_published(self):
+        """
+        Unlike get_active_sections(), this must never fall back to live
+        Section rows -- a None return is exactly what lets the preview show
+        an explicit "not yet published" state instead of draft content.
+        """
+        result = get_published_sections(self.screen.key)
+
+        self.assertIsNone(result)
+
+    def test_ignores_sections_added_after_publish(self):
+        self._publish()
+        Section.objects.create(
+            screen=self.screen,
+            widget_type=self.widget_type,
+            title="Added After Publish",
+            order=2,
+        )
+
+        result = get_published_sections(self.screen.key)
+
+        titles = [s["title"] for s in result["sections"]]
+        self.assertNotIn("Added After Publish", titles)
+
+    def test_unknown_screen_raises_layout_not_published(self):
+        with self.assertRaises(LayoutNotPublished):
+            get_published_sections("does_not_exist")
