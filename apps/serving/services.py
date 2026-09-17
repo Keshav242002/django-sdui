@@ -16,6 +16,7 @@ live Section ORM rows -- see apps.screens.services.get_active_sections().
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
+from django.db import Error as DjangoDBError
 from django.db import connections
 
 from apps.common.exceptions import AppError
@@ -105,6 +106,22 @@ def fetch_section_data(section: dict, user_id: str, fund_id: str | None = None) 
             return handler(user_id, fund_id=fund_id)
         except AppError as e:
             logger.warning("Widget data unavailable for widget_type=%s: %s", widget_type, e.message)
+            return {"status": "unavailable", "error_code": "WIDGET_UNAVAILABLE"}
+        except DjangoDBError:
+            # Postgres unreachable (plan.md phase-9): every widget handler
+            # falls back to a direct Postgres query on a cache miss/open
+            # circuit breaker, and that query isn't wrapped in AppError.
+            # Without this, a full DB outage would raise here uncaught and
+            # 500 the whole screen response -- defeating the bulkhead this
+            # function exists for (rules.md §3: "a failure in top_movers
+            # must never prevent portfolio_summary from rendering"). A DB
+            # outage is exactly the kind of failure that must stay isolated
+            # to this one section, same as an AppError.
+            logger.error(
+                "Postgres unreachable fetching widget_type=%s; isolating to this section",
+                widget_type,
+                exc_info=True,
+            )
             return {"status": "unavailable", "error_code": "WIDGET_UNAVAILABLE"}
     finally:
         connections.close_all()

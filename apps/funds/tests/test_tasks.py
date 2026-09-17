@@ -12,13 +12,17 @@ from apps.funds.services import (
     TRENDING_FUNDS_TTL,
     compute_portfolio_snapshot,
 )
+from django.conf import settings as django_settings
+
 from apps.funds.tasks import (
     recompute_all_portfolio_snapshots,
     recompute_portfolio_snapshot,
+    recompute_recommended_funds,
     recompute_top_movers,
     recompute_trending,
     retry_failed_portfolio_recomputes,
 )
+from apps.screens.tasks import warm_layout_cache
 
 TEST_CACHES = {
     "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
@@ -29,6 +33,33 @@ TEST_CACHES = {
 class FundsTasksTestCase(TestCase):
     def setUp(self):
         cache.clear()
+
+
+class TasksAreAcksLateTests(TestCase):
+    """
+    plan.md phase-9 Key Decision #7: every task in this project is an
+    idempotent overwrite/append-only write, so a single global
+    CELERY_TASK_ACKS_LATE = True (rather than acks_late=True sprinkled
+    per-@shared_task) is correct -- redelivery after a worker crash
+    mid-task is safe to allow rather than silently losing the task.
+    """
+
+    def test_celery_task_acks_late_setting_is_true(self):
+        self.assertTrue(django_settings.CELERY_TASK_ACKS_LATE)
+
+    def test_tasks_do_not_override_acks_late(self):
+        tasks = [
+            recompute_top_movers,
+            recompute_trending,
+            recompute_recommended_funds,
+            recompute_portfolio_snapshot,
+            recompute_all_portfolio_snapshots,
+            retry_failed_portfolio_recomputes,
+            warm_layout_cache,
+        ]
+        for task in tasks:
+            with self.subTest(task=task.name):
+                self.assertTrue(task.acks_late)
 
 
 class RecomputeTopMoversTests(FundsTasksTestCase):

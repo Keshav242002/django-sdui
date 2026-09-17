@@ -2,6 +2,7 @@ import uuid
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.db.utils import OperationalError as DjangoOperationalError
 from django.test import TestCase, override_settings
 
 from apps.common.cache import cache_client, flag_cache_key
@@ -96,6 +97,28 @@ class EvaluateFlagUnknownKeyTests(FlagsServicesTestCase):
 
         self.assertTrue(result)
         self.assertTrue(any("does_not_exist" in message for message in logs.output))
+
+
+class EvaluateFlagPostgresDownTests(FlagsServicesTestCase):
+    """
+    plan.md phase-9: caught live while manually verifying the static
+    layout fallback -- Postgres down (and no Redis-cached flag definition)
+    must fail the gated section open, not 500 the whole screen just
+    because one flag's DB fallback query failed.
+    """
+
+    def test_postgres_down_fails_open_and_logs_error(self):
+        flag = FeatureFlag.objects.create(key="db_down_flag", is_enabled=True, rollout_percentage=0)
+
+        with patch(
+            "apps.flags.services.FeatureFlag.objects.prefetch_related",
+            side_effect=DjangoOperationalError("connection refused"),
+        ):
+            with self.assertLogs("apps.flags.services", level="ERROR") as logs:
+                result = evaluate_flag(flag.key, {"user_id": "u1"})
+
+        self.assertTrue(result)
+        self.assertTrue(any("db_down_flag" in message for message in logs.output))
 
 
 class EvaluateFlagCachingTests(FlagsServicesTestCase):

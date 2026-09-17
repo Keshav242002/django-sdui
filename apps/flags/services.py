@@ -12,6 +12,8 @@ fail-open and caching rationale.
 import hashlib
 import logging
 
+from django.db import Error as DjangoDBError
+
 from apps.common.cache import cache_client, flag_cache_key
 from apps.flags.models import FeatureFlag
 
@@ -44,6 +46,19 @@ def _get_flag_definition(flag_key: str) -> dict | None:
     try:
         flag = FeatureFlag.objects.prefetch_related("targeting_rules").get(key=flag_key)
     except FeatureFlag.DoesNotExist:
+        return None
+    except DjangoDBError:
+        # Postgres unreachable (plan.md phase-9 Key Decision #2's fallback
+        # scenario also reaches here: layout served from the static
+        # fallback file, but flag evaluation still needs a live DB read on
+        # a cache miss). Distinct from "unknown key" -- this is an infra
+        # outage, not a config typo -- but the caller's existing fail-open
+        # handling (evaluate_flag's None branch) is still the right
+        # response: a gated section staying visible during an outage beats
+        # 500ing the whole screen over one flag lookup.
+        logger.error(
+            "Postgres unreachable evaluating flag '%s'; failing open", flag_key, exc_info=True
+        )
         return None
 
     definition = {

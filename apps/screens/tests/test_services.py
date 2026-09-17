@@ -1,11 +1,15 @@
+import json
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.db.utils import OperationalError as DjangoOperationalError
 from django.test import TestCase, override_settings
 from kombu.exceptions import OperationalError
 
 from apps.common.cache import layout_cache_key
-from apps.common.exceptions import LayoutNotPublished
+from apps.common.exceptions import LayoutNotPublished, LayoutUnavailable
 from apps.screens.models import LayoutVersion, Screen, Section, WidgetType
 from apps.screens.services import (
     get_active_sections,
@@ -244,3 +248,66 @@ class GetPublishedSectionsTests(ScreensServicesTestCase):
     def test_unknown_screen_raises_layout_not_published(self):
         with self.assertRaises(LayoutNotPublished):
             get_published_sections("does_not_exist")
+
+
+class StaticFallbackTests(ScreensServicesTestCase):
+    """
+    PRD §12A fallback tier 4 / plan.md phase-9 Key Decision #2: a static
+    last-known-good file, written on every publish, read only when Postgres
+    itself is unreachable (not just "no LayoutVersion published yet" --
+    that's tier 3, already covered by GetActiveSectionsTests above).
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._override = override_settings(LAYOUT_FALLBACK_DIR=Path(self._tmp_dir.name))
+        self._override.enable()
+        self.addCleanup(self._override.disable)
+        self.addCleanup(self._tmp_dir.cleanup)
+
+    def test_publish_writes_static_fallback_file(self):
+        self._publish()
+
+        fallback_path = Path(self._tmp_dir.name) / f"{self.screen.key}.json"
+        self.assertTrue(fallback_path.exists())
+        written = json.loads(fallback_path.read_text())
+        self.assertEqual(written["version_number"], 1)
+        self.assertEqual(written["sections"][0]["widget_type"], "portfolio_summary")
+
+    def test_falls_back_to_static_file_when_postgres_down(self):
+        self._publish()
+        cache.clear()
+
+        with patch(
+            "apps.screens.services.Screen.objects.get",
+            side_effect=DjangoOperationalError("connection refused"),
+        ):
+            with self.assertLogs("apps.screens.services", level="ERROR"):
+                result = get_active_sections(self.screen.key)
+
+        self.assertEqual(result["version_number"], 1)
+        self.assertEqual(result["sections"][0]["widget_type"], "portfolio_summary")
+
+    def test_raises_layout_unavailable_when_nothing_works(self):
+        # Never published for this screen_key -- no fallback file exists.
+        cache.clear()
+
+        with patch(
+            "apps.screens.services.Screen.objects.get",
+            side_effect=DjangoOperationalError("connection refused"),
+        ):
+            with self.assertRaises(LayoutUnavailable):
+                get_active_sections(self.screen.key)
+
+    def test_ignores_malformed_fallback_file(self):
+        fallback_path = Path(self._tmp_dir.name) / f"{self.screen.key}.json"
+        fallback_path.write_text("not valid json{{{")
+        cache.clear()
+
+        with patch(
+            "apps.screens.services.Screen.objects.get",
+            side_effect=DjangoOperationalError("connection refused"),
+        ):
+            with self.assertRaises(LayoutUnavailable):
+                get_active_sections(self.screen.key)
