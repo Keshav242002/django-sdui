@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.funds.models import Fund, Holding, Portfolio, PortfolioSnapshot, Transaction
+from apps.funds.models import FailedTaskRecompute, Fund, Holding, Portfolio, PortfolioSnapshot, Transaction
 
 
 @admin.register(Fund)
@@ -43,3 +43,28 @@ class PortfolioSnapshotAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(FailedTaskRecompute)
+class FailedTaskRecomputeAdmin(admin.ModelAdmin):
+    """
+    DLQ inspection table. Read-only -- rows are written exclusively by
+    recompute_all_portfolio_snapshots and updated by
+    retry_failed_portfolio_recomputes. Engineers use this to identify
+    EXHAUSTED rows that need manual investigation.
+    """
+
+    list_display = ("user_id", "status", "attempts", "failed_at", "resolved_at")
+    list_filter = ("status",)
+    search_fields = ("user_id",)
+    ordering = ("-failed_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+

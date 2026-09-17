@@ -7,9 +7,11 @@ from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITransactionTestCase
 
+from apps.common.cache import widget_cache_key
 from apps.common.exceptions import WidgetDataUnavailable
 from apps.flags.models import FeatureFlag
 from apps.funds.models import Fund, Holding, Portfolio, PortfolioSnapshot
+from apps.funds.tasks import recompute_top_movers
 from apps.screens.models import Screen, Section, WidgetType
 from apps.screens.services import publish_layout
 from apps.serving import widget_registry
@@ -216,6 +218,25 @@ class ScreenViewTests(ServingTestDataMixin, APITransactionTestCase):
 
         self.assertEqual(response.data["data"]["sections"][0]["title"], "Your Portfolio EDITED")
         self.assertEqual(response.data["data"]["layout_version"], 2)
+
+    def test_killed_widget_key_degrades_to_postgres_then_beat_repopulates_it(self):
+        """
+        The PRD §15 Phase 5 checkpoint: kill a Redis key manually, confirm
+        graceful degradation, confirm the beat job repopulates it.
+        """
+        cache.delete(widget_cache_key("top_movers"))
+
+        response = self.client.get(
+            f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_with_data)}
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        top_movers_section = response.data["data"]["sections"][2]
+        self.assertEqual(top_movers_section["data"][0]["name"], "Alpha Bluechip Equity Fund")
+
+        recompute_top_movers()
+
+        self.assertIsNotNone(cache.get(widget_cache_key("top_movers")))
 
 
 @override_settings(CACHES=TEST_CACHES)

@@ -9,6 +9,7 @@ See .env.example for all required variables.
 import os
 from pathlib import Path
 
+from celery.schedules import crontab
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -87,7 +88,7 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 
 # ---------------------------------------------------------------------------
-# Database — PostgreSQL (running in WSL2, exposed on 127.0.0.1:5432)
+# Database — PostgreSQL on 127.0.0.1:5432
 # ---------------------------------------------------------------------------
 
 DATABASES = {
@@ -103,7 +104,7 @@ DATABASES = {
 
 
 # ---------------------------------------------------------------------------
-# Cache — Redis (running in WSL2, exposed on 127.0.0.1:6379)
+# Cache — Redis on 127.0.0.1:6379
 # ---------------------------------------------------------------------------
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
@@ -135,6 +136,37 @@ CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", REDIS_URL)
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
+
+# Without these, a down/unreachable broker blocks .delay() for redis-py's
+# default connection timeout -- the same problem the cache OPTIONS above
+# solve, for the same reason (Phase 5, mirrors commit d39ac73). Callers of
+# .delay() (apps/screens/services.py, apps/funds/models.py) catch
+# kombu.exceptions.OperationalError and fall back to synchronous work.
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "socket_connect_timeout": 0.2,
+    "socket_timeout": 0.2,
+}
+
+# Hardcoded for Phase 5 per PRD §16 ("hardcode first, migrate to
+# django-celery-beat once the admin panel needs to control schedules").
+CELERY_BEAT_SCHEDULE = {
+    "recompute-top-movers": {
+        "task": "apps.funds.tasks.recompute_top_movers",
+        "schedule": 300.0,  # every 5 min (PRD §10)
+    },
+    "recompute-trending": {
+        "task": "apps.funds.tasks.recompute_trending",
+        "schedule": 900.0,  # every 15 min (PRD §10)
+    },
+    "recompute-all-portfolio-snapshots": {
+        "task": "apps.funds.tasks.recompute_all_portfolio_snapshots",
+        "schedule": crontab(hour=1, minute=30),  # daily, post-NAV window (PRD §9A)
+    },
+    "retry-failed-portfolio-recomputes": {
+        "task": "apps.funds.tasks.retry_failed_portfolio_recomputes",
+        "schedule": 900.0,  # every 15 min; self-heals DLQ rows (plan.md §14)
+    },
+}
 
 
 # ---------------------------------------------------------------------------

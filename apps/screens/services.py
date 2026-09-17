@@ -4,9 +4,13 @@ Business logic for the screens app.
 
 import logging
 
+from django.db import transaction
+from kombu.exceptions import OperationalError
+
 from apps.common.cache import cache_client, layout_cache_key
 from apps.common.exceptions import LayoutNotPublished
 from apps.screens.models import LayoutVersion, Screen
+from apps.screens.tasks import warm_layout_cache
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +51,15 @@ def _snapshot_sections(sections) -> list[dict]:
 def publish_layout(screen_key: str, published_by: str) -> LayoutVersion:
     """
     Snapshot a Screen's active Sections into a new immutable LayoutVersion,
-    mark it current, and warm the Redis cache synchronously.
+    mark it current, and warm the Redis cache.
+
+    Cache warming is dispatched to Celery (warm_layout_cache) once this
+    transaction commits -- never inside it, since post_save-style dispatch
+    before commit would let a worker read the DB before the new
+    LayoutVersion row is visible (plan.md Key Decisions §6). If the
+    broker is unreachable, falls back to the same synchronous write this
+    function used before Phase 5, so publishing never fails just because
+    a worker is down (plan.md Key Decisions §7).
 
     Raises LayoutNotPublished if the screen doesn't exist or has no active
     sections to publish.
@@ -76,9 +88,17 @@ def publish_layout(screen_key: str, published_by: str) -> LayoutVersion:
         is_current=True,
     )
 
-    # Synchronous cache warm (Phase 5 will swap this for an async Celery
-    # dispatch of warm_layout_cache -- see plan.md Key decisions §4).
-    cache_client.set(layout_cache_key(screen_key), snapshot, ttl=None)
+    def _dispatch_cache_warm():
+        try:
+            warm_layout_cache.delay(screen_key)
+        except OperationalError:
+            logger.warning(
+                "Celery broker unreachable; warming layout cache for '%s' synchronously",
+                screen_key,
+            )
+            cache_client.set(layout_cache_key(screen_key), snapshot, ttl=None)
+
+    transaction.on_commit(_dispatch_cache_warm)
 
     logger.info("Published layout v%s for screen '%s'", version_number, screen_key)
     return layout_version
