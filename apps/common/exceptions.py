@@ -43,6 +43,19 @@ class LayoutNotPublished(AppError):
     status_code = status.HTTP_404_NOT_FOUND
 
 
+class LayoutUnavailable(AppError):
+    """
+    Both Redis and Postgres are unreachable for this screen's layout, and no
+    static fallback file exists to serve instead (plan.md phase-9 Key
+    Decision #2). Deliberately distinct from LayoutNotPublished (404): that
+    means "this screen has no layout", this means "the backends are down" --
+    a client should retry, not stop asking.
+    """
+
+    code = "LAYOUT_UNAVAILABLE"
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+
 def custom_exception_handler(exc, context):
     """
     Global DRF exception handler registered via REST_FRAMEWORK["EXCEPTION_HANDLER"].

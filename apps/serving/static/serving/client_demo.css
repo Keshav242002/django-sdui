@@ -1,0 +1,157 @@
+/* Client demo page (plan.md phase-9). Standalone -- this app has no other
+   templates to share CSS with, so widget-card styling is a small, local
+   copy of the same look apps/screens/static/screens/preview.css uses
+   (only the JS renderer is a shared module, per plan.md Key Decision #4;
+   ~15 simple rules of presentation CSS isn't worth a cross-app static
+   dependency). */
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #1a1a2e;
+    color: #eaeaea;
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 12px 20px;
+    background: #16213e;
+    border-bottom: 1px solid #2a2a4a;
+    flex-wrap: wrap;
+}
+
+.toolbar-title .screen-key {
+    color: #8888aa;
+    margin-left: 8px;
+    font-size: 0.85em;
+}
+
+.toolbar form {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+    align-items: center;
+}
+
+.toolbar input {
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #33335a;
+    background: #0f0f23;
+    color: #eaeaea;
+    width: 200px;
+}
+
+.toolbar button,
+.toolbar a.force-down-link {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: none;
+    background: #4e6ef2;
+    color: #fff;
+    cursor: pointer;
+    text-decoration: none;
+    font-size: 0.9em;
+}
+
+.toolbar a.force-down-link.active {
+    background: #e05252;
+}
+
+.status-line {
+    max-width: 375px;
+    margin: 16px auto 0;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 0.9em;
+    text-align: center;
+    background: #24243e;
+    color: #ccccdd;
+}
+
+.status-line.status-ok {
+    background: #0a5c36;
+    color: #d6ffe8;
+}
+
+.status-line.status-warn {
+    background: #7a3b12;
+    color: #ffe3c7;
+}
+
+.phone-frame {
+    position: relative;
+    width: 375px;
+    margin: 24px auto 48px;
+    min-height: 400px;
+    background: #f5f5f7;
+    border-radius: 20px;
+    border: 6px solid #2a2a2a;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    color: #1a1a2e;
+}
+
+#screen-content {
+    padding: 16px;
+}
+
+.widget-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    border-left: 4px solid transparent;
+}
+
+.widget-card h3 {
+    margin: 0 0 8px;
+    font-size: 0.95em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.widget-card .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7em;
+    font-weight: 600;
+    color: #fff;
+}
+
+.widget-card .empty {
+    color: #9999aa;
+    font-size: 0.9em;
+    font-style: italic;
+}
+
+.widget-card .unknown-badge {
+    display: inline-block;
+    background: #ddd;
+    color: #555;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.8em;
+}
+
+.holding-row,
+.fund-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 0.9em;
+}
+
+.holding-row:last-child,
+.fund-row:last-child {
+    border-bottom: none;
+}

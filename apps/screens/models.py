@@ -87,7 +87,12 @@ class LayoutVersion(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["screen", "version_number"], name="unique_screen_version_number"
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["screen"],
+                condition=models.Q(is_current=True),
+                name="unique_current_layout_version_per_screen",
+            ),
         ]
 
     def __str__(self):
@@ -96,7 +101,11 @@ class LayoutVersion(models.Model):
     def save(self, *args, **kwargs):
         """
         Enforce the invariant that only one LayoutVersion per screen can be
-        is_current=True. DB-level partial unique index is deferred to Phase 3.
+        is_current=True. Backed by a DB-level partial unique index
+        (Meta.constraints: unique_current_layout_version_per_screen,
+        plan.md phase-9) as a safety net -- this application-level guard
+        remains the primary enforcement path since it also handles the
+        "unset the previous one" transition the DB constraint alone can't.
         """
         if self.is_current:
             LayoutVersion.objects.filter(screen=self.screen, is_current=True).exclude(

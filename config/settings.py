@@ -7,6 +7,7 @@ See .env.example for all required variables.
 """
 
 import os
+import sys
 from pathlib import Path
 
 import sentry_sdk
@@ -32,6 +33,24 @@ load_dotenv(BASE_DIR / ".env")
 PROMETHEUS_MULTIPROC_DIR = BASE_DIR / ".prometheus_multiproc"
 PROMETHEUS_MULTIPROC_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", str(PROMETHEUS_MULTIPROC_DIR))
+
+# ---------------------------------------------------------------------------
+# Static last-known-good layout fallback (PRD §12A fallback tier 4,
+# plan.md phase-9 Key Decision #2). apps/screens/services.py writes one
+# JSON file per screen here on every publish, and reads it back only when
+# both Redis and Postgres are unreachable. Generated state, not source --
+# gitignored, same treatment as PROMETHEUS_MULTIPROC_DIR above.
+#
+# Redirected to a separate subdirectory under `manage.py test`: several
+# test classes across apps/screens and apps/serving call publish_layout()
+# without individually overriding this setting, and publish_layout()'s
+# on_commit callback writes here unconditionally -- without this check,
+# every test run would silently overwrite the real dev-environment
+# fallback files with test fixture data (discovered while manually
+# verifying the fallback tier -- a "no data" screen_1 wound up sitting
+# next to hand-published test data in the same real var/ directory).
+# ---------------------------------------------------------------------------
+LAYOUT_FALLBACK_DIR = BASE_DIR / "var" / ("layout_fallback_test" if "test" in sys.argv else "layout_fallback")
 
 # ---------------------------------------------------------------------------
 # Sentry (PRD §13) — DSN is optional; an empty/missing DSN makes the SDK a
@@ -176,6 +195,13 @@ CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", REDIS_URL)
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
+
+# Every task in this project is an idempotent overwrite or append-only write
+# (recompute_* tasks overwrite the same cache key/create a new snapshot row;
+# see plan.md phase-9 Key Decision #7 for the per-task walkthrough) -- so
+# it's safe to risk redelivering a task after a worker crash mid-task,
+# rather than Celery's default at-most-once delivery silently losing it.
+CELERY_TASK_ACKS_LATE = True
 
 # Without these, a down/unreachable broker blocks .delay() for redis-py's
 # default connection timeout -- the same problem the cache OPTIONS above

@@ -3,6 +3,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.db.utils import OperationalError as DjangoOperationalError
 from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITransactionTestCase
@@ -174,6 +175,27 @@ class ScreenViewTests(ServingTestDataMixin, APITransactionTestCase):
         self.assertEqual(sections[1]["data"][0]["fund_name"], "Alpha Bluechip Equity Fund")
         self.assertEqual(sections[3]["data"][0]["name"], "Alpha Bluechip Equity Fund")
 
+    def test_bulkhead_isolates_a_postgres_outage_in_one_widget(self):
+        """
+        plan.md phase-9: caught live while manually verifying the static
+        layout fallback -- a raw django.db.Error from a widget's Postgres
+        fallback query (e.g. Postgres unreachable) must be isolated the
+        same way an AppError already is, not 500 the whole screen.
+        """
+
+        def raising_handler(user_id, fund_id=None):
+            raise DjangoOperationalError("connection refused")
+
+        with patch.dict(widget_registry.WIDGET_HANDLERS, {"horizontal_carousel": raising_handler}):
+            response = self.client.get(
+                f"/api/v1/screens/{self.screen.key}/", {"user_id": str(self.user_with_data)}
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        sections = response.data["data"]["sections"]
+        self.assertEqual(sections[2]["data"], {"status": "unavailable", "error_code": "WIDGET_UNAVAILABLE"})
+        self.assertEqual(sections[0]["data"]["total_value"], Decimal("1453.20"))
+
     def test_response_uses_published_snapshot_not_live_sections(self):
         publish_layout(self.screen.key, published_by="tester")
 
@@ -277,6 +299,26 @@ class WidgetViewTests(ServingTestDataMixin, APITransactionTestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["data"]["name"], "Alpha Bluechip Equity Fund")
+
+    def test_postgres_down_returns_503_not_a_generic_500(self):
+        """
+        plan.md phase-9: caught live while manually verifying the client
+        demo's fallback path -- this is exactly the endpoint
+        client_demo.js calls per-widget, so a Postgres outage here must
+        degrade the same expected way WidgetDataUnavailable already does
+        (503 + error envelope), not fall through as an "unexpected" 500.
+        """
+
+        def raising_handler(user_id, fund_id=None):
+            raise DjangoOperationalError("connection refused")
+
+        with patch.dict(widget_registry.WIDGET_HANDLERS, {"horizontal_carousel": raising_handler}):
+            response = self.client.get(
+                "/api/v1/widgets/horizontal_carousel/", {"user_id": str(self.user_with_data)}
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(response.data["error"]["code"], "WIDGET_UNAVAILABLE")
 
     def test_recommended_funds_widget_excludes_held_fund(self):
         response = self.client.get(

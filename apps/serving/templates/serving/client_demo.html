@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+{% load static %}
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Client Demo — {{ screen_key }}</title>
+    <link rel="stylesheet" href="{% static 'serving/client_demo.css' %}">
+</head>
+<body data-screen-key="{{ screen_key }}">
+    <div class="toolbar">
+        <div class="toolbar-title">
+            <strong>Client Demo</strong>
+            <span class="screen-key">{{ screen_key }}</span>
+        </div>
+
+        <a class="force-down-link{% if force_down %} active{% endif %}"
+           href="?{% if user_id %}user_id={{ user_id }}&{% endif %}force_down={% if force_down %}0{% else %}1{% endif %}">
+            {% if force_down %}Aggregator forced down (undo){% else %}Simulate aggregator down{% endif %}
+        </a>
+
+        <form method="get">
+            {% if force_down %}<input type="hidden" name="force_down" value="1">{% endif %}
+            <input type="text" name="user_id" placeholder="user_id (optional)" value="{{ user_id }}">
+            <button type="submit">Go</button>
+        </form>
+    </div>
+
+    <div id="status-line" class="status-line">Loading…</div>
+
+    <div class="phone-frame">
+        <div id="screen-content"></div>
+    </div>
+
+    <script src="{% static 'common/widget_renderers.js' %}"></script>
+    <script src="{% static 'serving/bundled_layouts.js' %}"></script>
+    <script src="{% static 'serving/client_demo.js' %}"></script>
+</body>
+</html>

@@ -74,3 +74,23 @@ class LayoutVersionModelTests(TestCase):
         v2.refresh_from_db()
         self.assertFalse(v1.is_current)
         self.assertTrue(v2.is_current)
+
+    def test_layoutversion_db_constraint_rejects_second_current_row(self):
+        """
+        plan.md phase-9: unique_current_layout_version_per_screen is a
+        DB-level safety net behind save()'s application-level guard
+        (test above). QuerySet.update() bypasses save() entirely (a raw
+        SQL UPDATE), so it's the only way to actually exercise the
+        constraint itself rather than just re-proving save()'s Python
+        logic.
+        """
+        screen = Screen.objects.create(key="mf_dashboard", name="MF Dashboard")
+        LayoutVersion.objects.create(
+            screen=screen, version_number=1, sections_snapshot=[], is_current=True
+        )
+        v2 = LayoutVersion.objects.create(
+            screen=screen, version_number=2, sections_snapshot=[], is_current=False
+        )
+
+        with self.assertRaises(IntegrityError):
+            LayoutVersion.objects.filter(pk=v2.pk).update(is_current=True)
